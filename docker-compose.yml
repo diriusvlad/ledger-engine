@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:16
+    container_name: ledger_postgres
+    environment:
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      POSTGRES_DB: ledger
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./internal/dbutil/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BIN: server
+    container_name: ledger_server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      LISTEN_ADDR: ":8080"
+      WEBHOOK_SECRET: dev-webhook-secret
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BIN: worker
+    container_name: ledger_worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      WEBHOOK_URL: "http://webhookconsumer:9090/webhook"
+      WEBHOOK_SECRET: dev-webhook-secret
+
+  webhookconsumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BIN: webhookconsumer
+    container_name: ledger_webhookconsumer
+    environment:
+      LISTEN_ADDR: ":9090"
+      WEBHOOK_SECRET: dev-webhook-secret
+    ports:
+      - "9090:9090"
